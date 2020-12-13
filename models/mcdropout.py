@@ -20,7 +20,7 @@ class MCDropout(nn.Module):
             self.noise_level = noise_level
         else:
             self.fc3 = nn.Linear(h_dim, o_dim)
-            self.noise_level = nn.Parameter(torch.as_tensor(noise_level))
+            self.noise_level = noise_level
         self.h_act = h_act()
         self.p = dropout
         self.o_dim = o_dim
@@ -36,7 +36,7 @@ class MCDropout(nn.Module):
             var = F.softplus(var)
             return mu, var
         else:
-            return self.fc3(x)
+            return self.fc3(x), self.noise_level
 
     def sample(self, input, samples):
         outputs = torch.zeros(samples, input.shape[0], self.o_dim)
@@ -48,13 +48,13 @@ class MCDropout(nn.Module):
                 outputs[i] = mu
                 uns[i] = var.sqrt()
             else:
-                outputs[i] = self(input)
+                outputs[i] = self(input)[0]
         mu = outputs.mean(0)
         un_model = outputs.std(0)
         if self.noise_level is None:
             un_noise = uns.mean(0)
         else:
-            un_noise = self.noise_level
+            un_noise = 0
         return mu, un_model+un_noise
 
 class DropDQNAgent(nn.Module):

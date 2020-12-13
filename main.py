@@ -11,6 +11,12 @@ from models.bayes import B3DQNAgent
 from models.mcdropout import DropDQNAgent
 from models.deepen import EnDQNAgent
 
+model_dict = {'dqn': 'DQN',
+              'boot': 'BootDQN',
+              'bbb': 'Bayes by Backprop',
+              'drop': 'MC Dropout',
+              'en': 'Deep Ensemble'}
+
 agent_dict = {'DQN': DQNAgent,
               'BootDQN': BootDQNAgent,
               'Bayes by Backprop': B3DQNAgent,
@@ -38,6 +44,16 @@ def epsilon_greedy(agent, epsilon, state):
 def thompson_sampling(agent, epsilon, state):
     q_mu, q_sigma = agent(state)
     q_estimate = q_mu + epsilon*torch.randn_like(q_sigma)*q_sigma
+    return np.argmax(q_estimate.detach().numpy())
+
+def thompson_fixed(agent, epsilon, state, rv):
+    q_mu, q_sigma = agent(state)
+    q_estimate = q_mu + epsilon*rv*q_sigma
+    return np.argmax(q_estimate.detach().numpy())
+
+def optimistic(agent, epsilon, state):
+    q_mu, q_sigma = agent(state)
+    q_estimate = q_mu + epsilon*q_sigma
     return np.argmax(q_estimate.detach().numpy())
 
 exploration_dict = {'DQN': epsilon_greedy,
@@ -68,10 +84,12 @@ def main(args):
     save_dir = args.save_dir
     max_episode = args.max_episode
     max_epi_step = args.max_epi_step
-    agent_name = args.agent_name
+    agent_name = model_dict[args.agent_name]
     model_save_dir = os.path.join(model_dir, agent_name)
     if not os.path.exists(model_save_dir):
         os.mkdir(model_save_dir)
+    if not os.path.exists(save_dir):
+        os.mkdir(save_dir)
 
     epoch_reward = []
 
@@ -107,13 +125,14 @@ def main(args):
 
         print('\nEpoch %d\n' % (epoch+1))
         reward_list = []
+        train_list = []
 
         for episode in range(max_episode):
 
             state = env.reset()
-            state = torch.tensor(state, dtype=torch.float32).reshape(-1, state_dim)
+            state = torch.FloatTensor(state).reshape(-1, state_dim)
 
-            reward_epi = []
+            train_epi = []
             loss_epi = []
             action = None
             agent.training = True
@@ -128,7 +147,8 @@ def main(args):
 
                 state, reward, done, _ = env.step(action)
 
-                state = torch.tensor(state, dtype=torch.float32).reshape(-1, state_dim)
+                state = torch.FloatTensor(state).reshape(-1, state_dim)
+                train_epi.append(reward)
 
                 # make a transition and save to replay memory
                 transition = [before_state, action, reward, state, done]
@@ -137,15 +157,17 @@ def main(args):
                 if agent.train_start():
                     agent.training = True
                     if agent_name == 'Bayes by Backprop':
-                        loss = agent.train(lamb, k=args.k, max_norm=args.max_norm)
+                        loss = agent.train(lamb, k=args.k,
+                                           max_norm=args.max_norm)
                     else:
                         loss = agent.train(k=args.k, max_norm=args.max_norm)
                     loss_epi.append(loss)
                 if done:
                     break
 
+            reward_epi = []
             state = env.reset()
-            state = torch.tensor(state, dtype=torch.float32).reshape(-1, state_dim)
+            state = torch.FloatTensor(state).reshape(-1, state_dim)
             agent.training = False
             for epi_step in range(max_epi_step):
 
@@ -156,7 +178,7 @@ def main(args):
 
                 state, reward, done, _ = env.step(action)
 
-                state = torch.tensor(state, dtype=torch.float32).reshape(-1, state_dim)
+                state = torch.FloatTensor(state).reshape(-1, state_dim)
                 reward_epi.append(reward)
 
                 if done:
@@ -172,13 +194,24 @@ def main(args):
             else:
                 lamb = lamb_max
 
+            train_list.append(sum(train_epi))
             reward_list.append(sum(reward_epi))
 
             if (episode+1) % 10 == 0:
-                print('Episode:%d \t Rewards:%.1f \t Epsilon:%.2f' % (episode+1, reward_list[-1], epsilon))
-
-        torch.save(agent.q_net.state_dict(),
-                   os.path.join(model_save_dir, '%d.pt' % epoch))
+                print('Episode:%d \t Rewards:%.1f \t Epsilon:%.2f'
+                      % (episode+1, reward_list[-1], epsilon))
+        if agent_name == 'BootDQN' or agent_name == 'Deep Ensemble':
+            torch.save(agent.q_nets.state_dict(),
+                       os.path.join(model_save_dir, '%d.pt' % epoch))
+        else:
+            torch.save(agent.q_net.state_dict(),
+                       os.path.join(model_save_dir, '%d.pt' % epoch))
+        arr = np.asarray(train_list)
+        np.save(os.path.join(save_dir,
+                             '%s_train%d.npy' % (agent_name, epoch)), arr)
+        arr = np.asarray(reward_list)
+        np.save(os.path.join(save_dir,
+                             '%s_eval%d.npy' % (agent_name, epoch)), arr)
         epoch_reward.append(reward_list)
 
     env.close()
@@ -188,16 +221,16 @@ def main(args):
 
 if __name__ == '__main__':
     parser = ArgumentParser()
-    parser.add_argument('--agent_name', type=str, default='DQN')
-    parser.add_argument('--env', type=str, default='CartPole-v0')
+    parser.add_argument('--agent_name', type=str, default='dqn')
+    parser.add_argument('--env', type=str, default='CartPole-v1')
     parser.add_argument('--model_dir', type=str, default='experiments')
     parser.add_argument('--save_dir', type=str, default='rst')
     parser.add_argument('--n_epoch', type=int, default=10)
-    parser.add_argument('--max_episode', type=int, default=210)
-    parser.add_argument('--max_epi_step', type=int, default=200)
+    parser.add_argument('--max_episode', type=int, default=310)
+    parser.add_argument('--max_epi_step', type=int, default=500)
     parser.add_argument('--h_dim', type=int, default=128)
     parser.add_argument('--h_act', type=str, default='elu')
-    parser.add_argument('--buffer_size', type=int, default=100000)
+    parser.add_argument('--buffer_size', type=int, default=1000000)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--gamma', type=float, default=0.95)
@@ -207,11 +240,11 @@ if __name__ == '__main__':
     parser.add_argument('--noise_level', type=float, default=None)
     parser.add_argument('--n_model', type=int, default=5)
     parser.add_argument('--n_sample', type=int, default=5)
-    parser.add_argument('--epsilon', type=float, default=0.9)
-    parser.add_argument('--epsilon_min', type=float, default=5e-3)
+    parser.add_argument('--epsilon', type=float, default=1.0)
+    parser.add_argument('--epsilon_min', type=float, default=1e-2)
     parser.add_argument('--decay_rate', type=float, default=5e-3)
-    parser.add_argument('--k', type=int, default=4)
-    parser.add_argument('--max_norm', type=float, default=5.)
+    parser.add_argument('--k', type=int, default=1)
+    parser.add_argument('--max_norm', type=float, default=None)
     parser.add_argument('--lamb', type=float, default=1e-5)
     parser.add_argument('--lamb_max', type=float, default=1e-3)
     parser.add_argument('--increase_rate', type=float, default=1e-5)

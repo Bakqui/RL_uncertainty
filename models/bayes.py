@@ -20,7 +20,7 @@ class BayesNet(nn.Module):
             self.noise_level = noise_level
         else:
             self.fc3 = BayesLinear(h_dim, o_dim)
-            self.noise_level = nn.Parameter(torch.as_tensor(noise_level))
+            self.noise_level = noise_level
         self.h_act = h_act()
         self.o_dim = o_dim
 
@@ -32,7 +32,7 @@ class BayesNet(nn.Module):
             var = F.softplus(var)
             return mu, var
         else:
-            return self.fc3(x)
+            return self.fc3(x), self.noise_level
 
     def log_p(self):
         return self.fc1.log_p + self.fc2.log_p + self.fc3.log_p
@@ -53,7 +53,7 @@ class BayesNet(nn.Module):
                 outputs[i] = mu
                 uns[i] = var.sqrt()
             else:
-                outputs[i] = self(input)
+                outputs[i] = self(input)[0]
             if kl:
                 log_priors[i] = self.log_p()
                 log_var_posts[i] = self.log_q()
@@ -62,7 +62,7 @@ class BayesNet(nn.Module):
         if self.noise_level is None:
             un_noise = uns.mean(0)
         else:
-            un_noise = self.noise_level
+            un_noise = 0
         if kl:
             return mu, un_model+un_noise, log_priors.mean(), log_var_posts.mean()
         return mu, un_model+un_noise
