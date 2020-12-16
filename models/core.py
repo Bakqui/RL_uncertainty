@@ -15,7 +15,7 @@ class DiagGaussian:
     def scale(self):
         return F.softplus(self.rho)
 
-    def log_prob(self, input: torch.Tensor) -> torch.Tensor:
+    def log_prob(self, input):
         rst = -math.log(math.sqrt(2 * math.pi))
         rst -= torch.log(self.scale)
         rst -= ((input - self.loc) ** 2) / (2 * self.scale ** 2)
@@ -24,12 +24,6 @@ class DiagGaussian:
     def rsample(self):
         eps = self.dist.sample(self.rho.size())
         return self.loc + self.scale*eps
-
-    def __repr__(self):
-        return self.__class__.__name__ +\
-            '(loc: {}, scale: {})'.format(
-                self.loc.size(), self.scale.size()
-            )
 
 class ScaleMixture:
     def __init__(self, pi=0.5, scale1=torch.Tensor([1.]),
@@ -96,11 +90,6 @@ class BayesLinear(nn.Module):
             else:
                 bias = None
         return F.linear(input, weight, bias)
-
-    def extra_repr(self) -> str:
-        return 'in_features={}, out_features={}, bias={}'.format(
-            self.in_features, self.out_fetures, self.bias is not None
-        )
 
 class SimpleMLP(nn.Module):
     def __init__(self, in_dim, o_dim, h_dim,
